@@ -1,10 +1,13 @@
+/// This file contains modified code from the Dart project authors,
+/// licensed under the BSD 3-Clause License.
+/// Modifications by Levent Suncar (2025).
+
 library csc_picker;
 
 import 'package:csc_picker/dropdown_with_search.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'model/select_status_model.dart';
 
 enum Layout { vertical, horizontal }
 
@@ -638,20 +641,25 @@ class CSCPickerState extends State<CSCPicker> {
   }
 
   ///Read JSON country data from assets
+  ///Yeni JSON formatı: countries_states_cities.json
   Future<dynamic> getResponse() async {
     var res = await rootBundle
-        .loadString('packages/csc_picker/lib/assets/country.json');
+        .loadString('packages/csc_picker/lib/assets/countries_states_cities.json');
     return jsonDecode(res);
   }
 
   ///get countries from json response
+  ///Yeni JSON formatı: countries_states_cities.json
   Future<List<String?>> getCountries() async {
     _country.clear();
     var countries = await getResponse() as List;
     if (_countryFilter.isNotEmpty) {
       _countryFilter.forEach((element) {
-        var result = countries[Countries[element]!];
-        if(result!=null) addCountryToList(result);
+        var index = Countries[element];
+        if (index != null && index < countries.length) {
+          var result = countries[index];
+          if(result!=null) addCountryToList(result);
+        }
       });
     } else {
       countries.forEach((data) {
@@ -663,105 +671,158 @@ class CSCPickerState extends State<CSCPicker> {
   }
 
   ///Add a country to country list
+  ///Yeni JSON formatı: countries_states_cities.json
+  ///Ülke isimleri native (yerel) haliyle gösterilir
   void addCountryToList(data) {
-    var model = Country();
-    model.name = data['name'];
-    model.emoji = data['emoji'];
+    String? native = data['native'] ?? data['name']; // native yoksa name kullan
+    String? emoji = data['emoji'];
     if (!mounted) return;
     setState(() {
       widget.flagState == CountryFlag.ENABLE ||
               widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY
-          ? _country.add(model.emoji! +
+          ? _country.add((emoji ?? '') +
               "    " +
-              model.name!) /* : _country.add(model.name)*/
-          : _country.add(model.name);
+              (native ?? '')) /* : _country.add(native)*/
+          : _country.add(native);
     });
   }
 
   ///get states from json response
+  ///Yeni JSON formatı: countries_states_cities.json
   Future<List<String?>> getStates() async {
     _states.clear();
-    //print(_selectedCountry);
-    var response = await getResponse();
-    var takeState = widget.flagState == CountryFlag.ENABLE ||
-            widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY
-        ? response
-            .map((map) => Country.fromJson(map))
-            .where(
-                (item) => item.emoji + "    " + item.name == _selectedCountry)
-            .map((item) => item.state)
-            .toList()
-        : response
-            .map((map) => Country.fromJson(map))
-            .where((item) => item.name == _selectedCountry)
-            .map((item) => item.state)
-            .toList();
-    var states = takeState as List;
-    states.forEach((f) {
-      if (!mounted) return;
+    
+    // Eğer ülke seçilmemişse, state yükleme
+    if (_selectedCountry == null || _selectedCountry!.isEmpty) {
+      return _states;
+    }
+    
+    var response = await getResponse() as List;
+    
+    // Seçili ülkeyi bul (native ismi ile)
+    Map<String, dynamic>? selectedCountryData;
+    try {
+      // _selectedCountry değeri emoji + native formatında olabilir veya sadece native olabilir
+      String countryNative = _selectedCountry!;
+      
+      // Eğer emoji + native formatındaysa (emoji genellikle 4 karakter + boşluklar)
+      if (widget.flagState == CountryFlag.ENABLE ||
+          widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY) {
+        // Emoji + native formatından sadece native'i çıkar
+        if (countryNative.length > 6 && countryNative.contains('    ')) {
+          countryNative = countryNative.substring(6).trim();
+        }
+      }
+      
+      // Ülkeyi native veya name ile bul
+      selectedCountryData = response.firstWhere(
+        (country) {
+          String? countryNativeValue = country['native'] ?? country['name'];
+          return countryNativeValue == countryNative;
+        },
+      ) as Map<String, dynamic>?;
+    } catch (e) {
+      // Ülke bulunamadı
+      print('⚠️ getStates: Ülke bulunamadı: $_selectedCountry, Hata: $e');
+      return _states;
+    }
+    
+    if (selectedCountryData != null && selectedCountryData['states'] != null) {
+      var statesList = selectedCountryData['states'] as List;
+      if (!mounted) return _states;
       setState(() {
-        var name = f.map((item) => item.name).toList();
-        for (var stateName in name) {
-          //print(stateName.toString());
-          _states.add(stateName.toString());
+        for (var state in statesList) {
+          if (state['name'] != null) {
+            _states.add(state['name'].toString());
+          }
         }
       });
-    });
+    }
     _states.sort((a, b) => a!.compareTo(b!));
     return _states;
   }
 
   ///get cities from json response
+  ///Yeni JSON formatı: countries_states_cities.json
   Future<List<String?>> getCities() async {
     _cities.clear();
-    var response = await getResponse();
-    var takeCity = widget.flagState == CountryFlag.ENABLE ||
-            widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY
-        ? response
-            .map((map) => Country.fromJson(map))
-            .where(
-                (item) => item.emoji + "    " + item.name == _selectedCountry)
-            .map((item) => item.state)
-            .toList()
-        : response
-            .map((map) => Country.fromJson(map))
-            .where((item) => item.name == _selectedCountry)
-            .map((item) => item.state)
-            .toList();
-    var cities = takeCity as List;
-    cities.forEach((f) {
-      // f bir List<Region> (state listesi)
-      // Eğer showStates false ise, tüm state'lerdeki şehirleri yükle
+    
+    // Eğer ülke seçilmemişse, şehir yükleme
+    if (_selectedCountry == null || _selectedCountry!.isEmpty) {
+      return _cities;
+    }
+    
+    var response = await getResponse() as List;
+    
+    // Seçili ülkeyi bul (native ismi ile)
+    Map<String, dynamic>? selectedCountryData;
+    try {
+      // _selectedCountry değeri emoji + native formatında olabilir veya sadece native olabilir
+      String countryNative = _selectedCountry!;
+      
+      // Eğer emoji + native formatındaysa (emoji genellikle 4 karakter + boşluklar)
+      if (widget.flagState == CountryFlag.ENABLE ||
+          widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY) {
+        // Emoji + native formatından sadece native'i çıkar
+        if (countryNative.length > 6 && countryNative.contains('    ')) {
+          countryNative = countryNative.substring(6).trim();
+        }
+      }
+      
+      // Ülkeyi native veya name ile bul
+      selectedCountryData = response.firstWhere(
+        (country) {
+          String? countryNativeValue = country['native'] ?? country['name'];
+          return countryNativeValue == countryNative;
+        },
+      ) as Map<String, dynamic>?;
+    } catch (e) {
+      // Ülke bulunamadı
+      print('⚠️ getCities: Ülke bulunamadı: $_selectedCountry, Hata: $e');
+      return _cities;
+    }
+    
+    if (selectedCountryData != null && selectedCountryData['states'] != null) {
+      var statesList = selectedCountryData['states'] as List;
+      
       if (!widget.showStates) {
-        // f bir state listesi, her bir state'teki tüm city'leri topla
-        (f as List).forEach((stateItem) {
-          if (stateItem.city != null) {
-            stateItem.city!.forEach((cityItem) {
-              if (!mounted) return;
-              setState(() {
-                if (cityItem.name != null && !_cities.contains(cityItem.name)) {
-                  _cities.add(cityItem.name!);
+        // Tüm state'lerdeki şehirleri yükle
+        if (!mounted) return _cities;
+        setState(() {
+          for (var state in statesList) {
+            if (state['cities'] != null) {
+              var citiesList = state['cities'] as List;
+              for (var city in citiesList) {
+                if (city['name'] != null && !_cities.contains(city['name'])) {
+                  _cities.add(city['name'].toString());
                 }
-              });
-            });
+              }
+            }
           }
         });
       } else {
-        // State seçimi varsa, sadece seçili state'teki şehirleri yükle
-        var name = (f as List).where((item) => item.name == _selectedState);
-        var cityName = name.map((item) => item.city).toList();
-        cityName.forEach((ci) {
-          if (!mounted) return;
-          setState(() {
-            var citiesName = ci.map((item) => item.name).toList();
-            for (var cityName in citiesName) {
-              //print(cityName.toString());
-              _cities.add(cityName.toString());
-            }
-          });
-        });
+        // Sadece seçili state'teki şehirleri yükle
+        try {
+          var selectedState = statesList.firstWhere(
+            (state) => state['name'] == _selectedState,
+          ) as Map<String, dynamic>?;
+          
+          if (selectedState != null && selectedState['cities'] != null) {
+            var citiesList = selectedState['cities'] as List;
+            if (!mounted) return _cities;
+            setState(() {
+              for (var city in citiesList) {
+                if (city['name'] != null) {
+                  _cities.add(city['name'].toString());
+                }
+              }
+            });
+          }
+        } catch (e) {
+          // State bulunamadı
+        }
       }
-    });
+    }
     _cities.sort((a, b) => a!.compareTo(b!));
     return _cities;
   }
@@ -769,15 +830,19 @@ class CSCPickerState extends State<CSCPicker> {
   ///get methods to catch newly selected country state and city and populate state based on country, and city based on state
   void _onSelectedCountry(String value) {
     if (!mounted) return;
-    setState(() {
-      if (widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY) {
-        try {
-          this.widget.onCountryChanged!(value.substring(6).trim());
-        } catch (e) {}
-      } else
-        this.widget.onCountryChanged!(value);
-      //code added in if condition
-      if (value != _selectedCountry) {
+    
+    // Callback'i çağır
+    if (widget.flagState == CountryFlag.SHOW_IN_DROP_DOWN_ONLY) {
+      try {
+        this.widget.onCountryChanged!(value.substring(6).trim());
+      } catch (e) {}
+    } else {
+      this.widget.onCountryChanged!(value);
+    }
+    
+    //code added in if condition
+    if (value != _selectedCountry) {
+      setState(() {
         _states.clear();
         _cities.clear();
         _selectedState = widget.stateDropdownLabel;
@@ -785,34 +850,54 @@ class CSCPickerState extends State<CSCPicker> {
         this.widget.onStateChanged!(null);
         this.widget.onCityChanged!(null);
         _selectedCountry = value;
-        // Eğer showStates false ise, direkt cities yükle
-        if (!widget.showStates) {
-          getCities();
-        } else {
-          getStates();
-        }
+      });
+      
+      // Eğer showStates false ise, direkt cities yükle
+      if (!widget.showStates) {
+        getCities().then((_) {
+          if (mounted) {
+            setState(() {}); // UI'ı güncelle
+          }
+        });
       } else {
+        getStates().then((_) {
+          if (mounted) {
+            setState(() {}); // UI'ı güncelle
+          }
+        });
+      }
+    } else {
+      setState(() {
         this.widget.onStateChanged!(_selectedState);
         this.widget.onCityChanged!(_selectedCity);
-      }
-    });
+      });
+    }
   }
 
   void _onSelectedState(String value) {
     if (!mounted) return;
-    setState(() {
-      this.widget.onStateChanged!(value);
-      //code added in if condition
-      if (value != _selectedState) {
+    
+    this.widget.onStateChanged!(value);
+    
+    //code added in if condition
+    if (value != _selectedState) {
+      setState(() {
         _cities.clear();
         _selectedCity = widget.cityDropdownLabel;
         this.widget.onCityChanged!(null);
         _selectedState = value;
-        getCities();
-      } else {
+      });
+      
+      getCities().then((_) {
+        if (mounted) {
+          setState(() {}); // UI'ı güncelle
+        }
+      });
+    } else {
+      setState(() {
         this.widget.onCityChanged!(_selectedCity);
-      }
-    });
+      });
+    }
   }
 
   void _onSelectedCity(String value) {
