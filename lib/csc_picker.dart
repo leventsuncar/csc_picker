@@ -545,9 +545,8 @@ class CSCPicker extends StatefulWidget {
     this.countryDropdownLabel = "Country",
     this.stateDropdownLabel = "State",
     this.cityDropdownLabel = "City",
-
-    this.countryFilter, this.selectedItemPadding,
     this.countryFilter,
+    this.selectedItemPadding,
   }) : super(key: key);
 
   final ValueChanged<String>? onCountryChanged;
@@ -613,7 +612,12 @@ class CSCPickerState extends State<CSCPicker> {
   Future<void> setDefaults() async {
     if (widget.currentCountry != null) {
       setState(() => _selectedCountry = widget.currentCountry);
-      await getStates();
+      // Eğer showStates false ise, direkt cities yükle
+      if (!widget.showStates) {
+        await getCities();
+      } else {
+        await getStates();
+      }
     }
 
     if (widget.currentState != null) {
@@ -726,18 +730,37 @@ class CSCPickerState extends State<CSCPicker> {
             .toList();
     var cities = takeCity as List;
     cities.forEach((f) {
-      var name = f.where((item) => item.name == _selectedState);
-      var cityName = name.map((item) => item.city).toList();
-      cityName.forEach((ci) {
-        if (!mounted) return;
-        setState(() {
-          var citiesName = ci.map((item) => item.name).toList();
-          for (var cityName in citiesName) {
-            //print(cityName.toString());
-            _cities.add(cityName.toString());
+      // f bir List<Region> (state listesi)
+      // Eğer showStates false ise, tüm state'lerdeki şehirleri yükle
+      if (!widget.showStates) {
+        // f bir state listesi, her bir state'teki tüm city'leri topla
+        (f as List).forEach((stateItem) {
+          if (stateItem.city != null) {
+            stateItem.city!.forEach((cityItem) {
+              if (!mounted) return;
+              setState(() {
+                if (cityItem.name != null && !_cities.contains(cityItem.name)) {
+                  _cities.add(cityItem.name!);
+                }
+              });
+            });
           }
         });
-      });
+      } else {
+        // State seçimi varsa, sadece seçili state'teki şehirleri yükle
+        var name = (f as List).where((item) => item.name == _selectedState);
+        var cityName = name.map((item) => item.city).toList();
+        cityName.forEach((ci) {
+          if (!mounted) return;
+          setState(() {
+            var citiesName = ci.map((item) => item.name).toList();
+            for (var cityName in citiesName) {
+              //print(cityName.toString());
+              _cities.add(cityName.toString());
+            }
+          });
+        });
+      }
     });
     _cities.sort((a, b) => a!.compareTo(b!));
     return _cities;
@@ -762,7 +785,12 @@ class CSCPickerState extends State<CSCPicker> {
         this.widget.onStateChanged!(null);
         this.widget.onCityChanged!(null);
         _selectedCountry = value;
-        getStates();
+        // Eğer showStates false ise, direkt cities yükle
+        if (!widget.showStates) {
+          getCities();
+        } else {
+          getStates();
+        }
       } else {
         this.widget.onStateChanged!(_selectedState);
         this.widget.onCityChanged!(_selectedCity);
@@ -806,45 +834,55 @@ class CSCPickerState extends State<CSCPicker> {
             ? Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  countryDropdown(),
-                  SizedBox(
-                    height: 10.0,
-                  ),
+                  widget.disableCountry
+                      ? Container()
+                      : countryDropdown(),
+                  widget.disableCountry
+                      ? Container()
+                      : SizedBox(
+                          height: 10.0,
+                        ),
                   widget.showStates
                       ? stateDropdown()
                       : Container(),
-                  SizedBox(
-                    height: 10.0,
-                  ),
-                  widget.showStates && widget.showCities
+                  widget.showStates
+                      ? SizedBox(
+                          height: 10.0,
+                        )
+                      : Container(),
+                  widget.showCities
                       ? cityDropdown()
                       : Container()
                 ],
               )
-            : Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: <Widget>[
-                      Expanded(child: countryDropdown()),
-                      widget.showStates
-                          ? SizedBox(
-                              width: 10.0,
-                            )
-                          : Container(),
-                      widget.showStates
-                          ? Expanded(child: stateDropdown())
-                          : Container(),
+            : widget.disableCountry && !widget.showStates && widget.showCities
+                ? cityDropdown()
+                : Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: <Widget>[
+                          widget.disableCountry
+                              ? Container()
+                              : Expanded(child: countryDropdown()),
+                          widget.showStates && !widget.disableCountry
+                              ? SizedBox(
+                                  width: 10.0,
+                                )
+                              : Container(),
+                          widget.showStates
+                              ? Expanded(child: stateDropdown())
+                              : Container(),
+                        ],
+                      ),
+                      SizedBox(
+                        height: 10.0,
+                      ),
+                      widget.showCities
+                          ? cityDropdown()
+                          : Container()
                     ],
                   ),
-                  SizedBox(
-                    height: 10.0,
-                  ),
-                  widget.showStates && widget.showCities
-                      ? cityDropdown()
-                      : Container()
-                ],
-              ),
       ],
     );
   }
